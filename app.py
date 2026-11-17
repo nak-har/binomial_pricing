@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from pricing import (binomial_pricing, exercise_time_distribution, make_payoff,
-                     simulate_delta_hedge, calculate_greeks)
+                     simulate_delta_hedge, calculate_greeks, black_scholes_price)
 
 
 st.set_page_config(
@@ -465,7 +465,7 @@ def plot_hedging_error(records):
 
 
 # Sidebar inputs
-st.sidebar.caption("APP VERSION: FORMULAS V4")
+
 st.sidebar.header("Model settings")
 option_style = st.sidebar.segmented_control(
     "Exercise style", ["European", "American"],
@@ -507,12 +507,6 @@ r = r_percent / 100.0
 # The up/down factors are derived rather than entered independently.
 u = math.exp(sigma * math.sqrt(dt))
 d = math.exp(-sigma * math.sqrt(dt))
-st.sidebar.divider()
-st.sidebar.write(f"**Up factor (u):** {u:.4f}")
-st.sidebar.write(f"**Down factor (d):** {d:.4f}  (d = 1/u)")
-st.sidebar.write(f"**Maturity:** {(T - 1) * dt:.3f} years")
-st.sidebar.caption("CRR factors: u = exp(sigma * sqrt(dt)), d = exp(-sigma * sqrt(dt)).")
-st.sidebar.caption("T counts tree levels; there are T − 1 price transitions.")
 
 st.markdown(
     '<div class="app-eyebrow">INTERACTIVE PRICING MODEL</div>'
@@ -541,8 +535,6 @@ except (ValueError, OverflowError) as exc:
 
 p = (math.exp(r * dt) - d) / (u - d)
 q = 1 - p
-st.sidebar.success("No-arbitrage condition satisfied")
-st.sidebar.caption(f"Risk-neutral probabilities: up = {p:.4f}, down = {q:.4f}")
 
 # Root Greeks are computed from the currently selected payoff/exercise style.
 greeks = calculate_greeks(
@@ -585,12 +577,25 @@ with theta_col:
     greek_card("Θ", greek_fmt(greeks["theta_per_day"], 5), "Theta", "−∂V/∂τ, per calendar day")
 with rho_col:
     greek_card("ρ", greek_fmt(greeks["rho_per_bp"], 5), "Rho", "∂V/∂r, per basis point")
-st.caption(
-    "Δ and Γ use tree-based estimates · Vega is quoted per +1 volatility percentage point "
-    "· Θ per calendar day · ρ per +1 basis point (0.01%) of interest rate."
-)
+# Black–Scholes–Merton is a benchmark only for European vanilla options.
+# Keep it out of American/custom payoff views; do not confuse it with the
+# binomial engine or the American early-exercise valuation.
+if option_style == "European" and payoff_type in ("Call", "Put"):
+    remaining_maturity = (T - 1) * dt  # T is the number of tree LEVELS.
+    bsm_value = black_scholes_price(S, K, sigma, r, remaining_maturity, payoff_type)
+    bsm_difference = option_values[0][0] - bsm_value
+    st.markdown(
+        '<div style="font-size:0.86rem;color:#526782;'
+        'margin:0.28rem 0 0.48rem 0;">'
+        '<span style="font-weight:700;">Black–Scholes–Merton:</span> '
+        f'<span style="font-weight:700;color:#21395d;">${bsm_value:,.4f}</span>'
+        '<span style="margin:0 .65rem;color:#9aa9ba;">·</span>'
+        f'CRR − BSM: <strong>{bsm_difference:+.4f}</strong>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
-st.caption("Select a visualization. Hover over tree nodes to inspect values; use the sidebar to change inputs.")
+# Detailed units and finite-difference conventions remain in the Greeks details tab.
 if option_style == "American":
     option_tab, greeks_tab, stock_tab, delta_tab, payoff_tab, binomial_tab, hedge_tab, exercise_tab = st.tabs(
         ["Option tree", "Greeks · details", "Stock tree", "Delta hedge", "Payoff", "Binomial (n,p)", "Replication", "Exercise times"]
@@ -613,33 +618,6 @@ with option_tab:
     else:
         st.caption("For European exercise, the payoff is used only at maturity; earlier nodes use backward induction.")
 
-    # Formula references stay directly under the option tree; these do not
-    # alter valuation and are also useful when the user selects a custom payoff.
-    st.markdown('<div class="reference-title">MODEL EQUATIONS · REFERENCE</div>', unsafe_allow_html=True)
-    payoff_col, factors_col = st.columns([1, 1], gap="medium")
-    with payoff_col:
-        st.markdown(
-            r"**Call & put payoffs**  "
-            "\n" r"$C_T = \max(S_T-K,0)$  "
-            "\n" r"$P_T = \max(K-S_T,0)$"
-        )
-    with factors_col:
-        st.markdown(
-            r"**CRR up/down factors**  "
-            "\n" r"$u=e^{\sigma\sqrt{\Delta t}}$  "
-            "\n" r"$d=e^{-\sigma\sqrt{\Delta t}}=1/u$"
-        )
-    st.markdown(
-        r"**Black–Scholes PDE for $V(t,S)$** (non-dividend-paying stock)  "
-        "\n" r"$\displaystyle \frac{\partial V}{\partial t} + "
-        r"\frac{1}{2}\sigma^2S^2\frac{\partial^2V}{\partial S^2} "
-        r"+ rS\frac{\partial V}{\partial S} - rV = 0$"
-    )
-    st.caption(
-        "The PDE applies to a smooth European option value, and to an American option "
-        "in its continuation region. The displayed call/put payoffs are reference formulas "
-        "when Custom payoff is selected."
-    )
 
 with stock_tab:
     st.plotly_chart(
@@ -867,3 +845,22 @@ if option_style == "American":
                 "The exercise/no-exercise interpretation assumes a nonnegative custom payoff. "
                 "Terminal payoffs at or below zero are treated as expiring unexercised."
             )
+
+# Separate reference panel outside the visualization tabs, keeping the tree box clean.
+st.markdown('<div style="height:0.35rem"></div>', unsafe_allow_html=True)
+with st.container(border=True):
+    st.markdown("##### Model equations")
+    payoff_col, factors_col = st.columns(2, gap="medium")
+    with payoff_col:
+        st.markdown("**Call & put payoffs**")
+        st.latex(r"\begin{aligned} C_T &= \max(S_T-K,0) \\ P_T &= \max(K-S_T,0) \end{aligned}")
+    with factors_col:
+        st.markdown("**CRR up/down factors**")
+        st.latex(r"\begin{aligned} u &= e^{\sigma\sqrt{\Delta t}} \\ d &= e^{-\sigma\sqrt{\Delta t}} = 1/u \end{aligned}")
+    st.markdown("**Black–Scholes PDE** · non-dividend-paying stock")
+    st.latex(
+        r"\frac{\partial V}{\partial t} + "
+        r"\frac{1}{2}\sigma^2S^2\frac{\partial^2 V}{\partial S^2} "
+        r"+ rS\frac{\partial V}{\partial S} - rV = 0"
+    )
+    st.caption("For American options, the PDE applies in the continuation region.")
