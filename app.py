@@ -10,7 +10,7 @@ from pricing import (binomial_pricing, exercise_time_distribution, make_payoff,
 
 
 st.set_page_config(
-    page_title="Option Pricing Lab",
+    page_title="Binomial Pricing Model",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -20,13 +20,16 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-/* Remove the floating Streamlit header/Deploy toolbar so it cannot cover the title. */
-header[data-testid="stHeader"],
+/* Keep the sidebar toggle usable while preventing the top bar from obscuring content. */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    box-shadow: none !important;
+}
 [data-testid="stToolbar"],
 [data-testid="stDecoration"] {
     display: none !important;
 }
-/* Return the vertical space previously occupied by the floating header. */
+/* Use the available space without hiding the sidebar toggle. */
 [data-testid="stAppViewContainer"] .block-container {
     padding-top: .55rem !important;
 }
@@ -422,7 +425,7 @@ def plot_hedging_error(records):
 
 
 # Sidebar inputs
-st.sidebar.caption("APP VERSION: GREEKS V2")
+st.sidebar.caption("APP VERSION: GREEKS V3")
 st.sidebar.header("Model settings")
 option_style = st.sidebar.segmented_control(
     "Exercise style", ["European", "American"],
@@ -473,7 +476,7 @@ st.sidebar.caption("T counts tree levels; there are T − 1 price transitions.")
 
 st.markdown(
     '<div class="app-eyebrow">INTERACTIVE PRICING MODEL</div>'
-    '<div class="app-title">Option Pricing Lab</div>',
+    '<div class="app-title">Binomial Pricing Model</div>',
     unsafe_allow_html=True,
 )
 st.markdown(
@@ -517,12 +520,16 @@ def greek_fmt(value, digits=4):
 # Keep root price sensitivities visible at the very top of the app.
 st.markdown("##### Option price & Greeks")
 price_col, delta_col, gamma_col, vega_col, theta_col, rho_col = st.columns(6)
-price_col.metric("Option price", f"${option_values[0][0]:.4f}")
-delta_col.metric("Δ hedge", greek_fmt(greeks["delta_hedge"]))
-gamma_col.metric("Γ (tree)", greek_fmt(greeks["gamma"]))
-vega_col.metric("Vega / 1 vol pt", greek_fmt(greeks["vega_per_vol_point"]))
-theta_col.metric("Theta / day", greek_fmt(greeks["theta_per_day"], 5))
-rho_col.metric("Rho / 1 bp", greek_fmt(greeks["rho_per_bp"], 5))
+price_col.metric("V₀ · Option price", f"${option_values[0][0]:.4f}")
+delta_col.metric("Δ · ∂V/∂S", greek_fmt(greeks["delta_hedge"]))
+gamma_col.metric("Γ · ∂²V/∂S²", greek_fmt(greeks["gamma"]))
+vega_col.metric("𝒱 · ∂V/∂σ", greek_fmt(greeks["vega_per_vol_point"]))
+theta_col.metric("Θ · −∂V/∂τ", greek_fmt(greeks["theta_per_day"], 5))
+rho_col.metric("ρ · ∂V/∂r", greek_fmt(greeks["rho_per_bp"], 5))
+st.caption(
+    "Δ and Γ use tree-based estimates · Vega is quoted per +1 volatility percentage point "
+    "· Θ per calendar day · ρ per +1 basis point (0.01%) of interest rate."
+)
 
 st.caption("Select a visualization. Hover over tree nodes to inspect values; use the sidebar to change inputs.")
 if option_style == "American":
@@ -562,6 +569,18 @@ with delta_tab:
 
 with greeks_tab:
     st.markdown("#### Greeks at the initial node")
+    st.markdown(r"""
+| Greek | Mathematical definition |
+|:--|:--|
+| Delta (Δ) | $\displaystyle \frac{\partial V}{\partial S}$ |
+| Gamma (Γ) | $\displaystyle \frac{\partial^2 V}{\partial S^2}$ |
+| Vega (𝒱) | $\displaystyle \frac{\partial V}{\partial \sigma}$ |
+| Theta (Θ) | $\displaystyle -\frac{\partial V}{\partial \tau}$ |
+| Rho (ρ) | $\displaystyle \frac{\partial V}{\partial r}$ |
+
+Here $\tau$ is **time remaining to maturity**. The displayed numerical values
+use the per-unit conventions described above.
+""")
     st.info("Delta and Gamma come from tree hedges. Vega, Rho, and Theta are calculated by bumping one input and repricing the entire tree.")
     st.caption(
         "All values are per share of the option, not per 100-share contract. "
