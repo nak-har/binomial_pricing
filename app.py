@@ -108,6 +108,46 @@ header[data-testid="stHeader"] {
     .app-title { font-size: 1.25rem; }
     .block-container { padding-top: .65rem; }
 }
+
+/* Compact Greek cards: Greek symbol above the value, descriptive name below. */
+.greek-card {
+    min-height: 89px;
+    background: rgba(255,255,255,.95);
+    border: 1px solid #dce6f4;
+    border-radius: 13px;
+    padding: .36rem .38rem .38rem;
+    text-align: center;
+    box-shadow: 0 5px 20px rgba(39,64,112,.045);
+}
+.greek-symbol {
+    color: #4f46e5;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 1.15rem;
+    line-height: 1.05;
+    font-weight: 700;
+}
+.greek-value {
+    color: #21395d;
+    font-size: clamp(.79rem, 1.15vw, 1.09rem);
+    font-weight: 720;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    margin-top: .16rem;
+    line-height: 1.35;
+}
+.greek-name {
+    color: #657891;
+    font-size: .71rem;
+    font-weight: 600;
+    margin-top: .12rem;
+}
+.reference-title {
+    color: #526782;
+    font-size: .72rem;
+    letter-spacing: .08em;
+    font-weight: 740;
+    margin-top: .28rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -425,7 +465,7 @@ def plot_hedging_error(records):
 
 
 # Sidebar inputs
-st.sidebar.caption("APP VERSION: GREEKS V3")
+st.sidebar.caption("APP VERSION: FORMULAS V4")
 st.sidebar.header("Model settings")
 option_style = st.sidebar.segmented_control(
     "Exercise style", ["European", "American"],
@@ -517,15 +557,34 @@ def greek_fmt(value, digits=4):
     return "—" if value is None else f"{value:,.{digits}f}"
 
 
-# Keep root price sensitivities visible at the very top of the app.
+# Keep the root Greeks on-screen, with the symbols over the values.
 st.markdown("##### Option price & Greeks")
-price_col, delta_col, gamma_col, vega_col, theta_col, rho_col = st.columns(6)
-price_col.metric("V₀ · Option price", f"${option_values[0][0]:.4f}")
-delta_col.metric("Δ · ∂V/∂S", greek_fmt(greeks["delta_hedge"]))
-gamma_col.metric("Γ · ∂²V/∂S²", greek_fmt(greeks["gamma"]))
-vega_col.metric("𝒱 · ∂V/∂σ", greek_fmt(greeks["vega_per_vol_point"]))
-theta_col.metric("Θ · −∂V/∂τ", greek_fmt(greeks["theta_per_day"], 5))
-rho_col.metric("ρ · ∂V/∂r", greek_fmt(greeks["rho_per_bp"], 5))
+
+def greek_card(symbol, value, name, definition):
+    """Compact presentation card; the tooltip preserves the exact definition."""
+    from html import escape
+    st.markdown(
+        f'<div class="greek-card" title="{escape(definition, quote=True)}">'
+        f'<div class="greek-symbol">{escape(symbol)}</div>'
+        f'<div class="greek-value">{escape(value)}</div>'
+        f'<div class="greek-name">{escape(name)}</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+price_col, delta_col, gamma_col, vega_col, theta_col, rho_col = st.columns(6, gap="small")
+with price_col:
+    greek_card("V₀", f"${option_values[0][0]:.4f}", "Option price", "Price at the root node")
+with delta_col:
+    greek_card("Δ", greek_fmt(greeks["delta_hedge"]), "Delta", "∂V/∂S")
+with gamma_col:
+    greek_card("Γ", greek_fmt(greeks["gamma"]), "Gamma", "∂²V/∂S²")
+with vega_col:
+    greek_card("𝒱", greek_fmt(greeks["vega_per_vol_point"]), "Vega", "∂V/∂σ, per volatility percentage point")
+with theta_col:
+    greek_card("Θ", greek_fmt(greeks["theta_per_day"], 5), "Theta", "−∂V/∂τ, per calendar day")
+with rho_col:
+    greek_card("ρ", greek_fmt(greeks["rho_per_bp"], 5), "Rho", "∂V/∂r, per basis point")
 st.caption(
     "Δ and Γ use tree-based estimates · Vega is quoted per +1 volatility percentage point "
     "· Θ per calendar day · ρ per +1 basis point (0.01%) of interest rate."
@@ -553,6 +612,34 @@ with option_tab:
         st.caption("Orange nodes = optimal early exercise; blue nodes = continuation or terminal payoff.")
     else:
         st.caption("For European exercise, the payoff is used only at maturity; earlier nodes use backward induction.")
+
+    # Formula references stay directly under the option tree; these do not
+    # alter valuation and are also useful when the user selects a custom payoff.
+    st.markdown('<div class="reference-title">MODEL EQUATIONS · REFERENCE</div>', unsafe_allow_html=True)
+    payoff_col, factors_col = st.columns([1, 1], gap="medium")
+    with payoff_col:
+        st.markdown(
+            r"**Call & put payoffs**  "
+            "\n" r"$C_T = \max(S_T-K,0)$  "
+            "\n" r"$P_T = \max(K-S_T,0)$"
+        )
+    with factors_col:
+        st.markdown(
+            r"**CRR up/down factors**  "
+            "\n" r"$u=e^{\sigma\sqrt{\Delta t}}$  "
+            "\n" r"$d=e^{-\sigma\sqrt{\Delta t}}=1/u$"
+        )
+    st.markdown(
+        r"**Black–Scholes PDE for $V(t,S)$** (non-dividend-paying stock)  "
+        "\n" r"$\displaystyle \frac{\partial V}{\partial t} + "
+        r"\frac{1}{2}\sigma^2S^2\frac{\partial^2V}{\partial S^2} "
+        r"+ rS\frac{\partial V}{\partial S} - rV = 0$"
+    )
+    st.caption(
+        "The PDE applies to a smooth European option value, and to an American option "
+        "in its continuation region. The displayed call/put payoffs are reference formulas "
+        "when Custom payoff is selected."
+    )
 
 with stock_tab:
     st.plotly_chart(
