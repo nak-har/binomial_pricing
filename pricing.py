@@ -168,6 +168,49 @@ def make_payoff(payoff_type="Call", payoff_expression=None):
     return payoff
 
 
+def black_scholes_price(
+    S: float,
+    K: float,
+    sigma: float,
+    r: float,
+    maturity: float,
+    payoff_type: str = "Call",
+) -> float:
+    """Return the Black–Scholes–Merton price of a European vanilla option.
+
+    S is the current underlying price, K the strike, sigma the annualized
+    volatility, r the continuously compounded annual risk-free rate, and
+    maturity the remaining time to expiry in years. Assumes no dividends.
+    Returns a per-share price, consistent with binomial_pricing().
+    """
+    if payoff_type not in ("Call", "Put"):
+        raise ValueError("BSM benchmark supports only European calls and puts.")
+    if not all(math.isfinite(v) for v in (S, K, sigma, r, maturity)):
+        raise ValueError("BSM inputs must be finite.")
+    if S <= 0 or K < 0 or sigma <= 0 or maturity < 0:
+        raise ValueError("Require S > 0, K >= 0, sigma > 0 and maturity >= 0.")
+
+    if maturity == 0:
+        return max(S - K, 0.0) if payoff_type == "Call" else max(K - S, 0.0)
+    if K == 0:
+        return S if payoff_type == "Call" else 0.0
+
+    root_time = math.sqrt(maturity)
+    vol_time = sigma * root_time
+    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * maturity) / vol_time
+    d2 = d1 - vol_time
+    discount_strike = K * math.exp(-r * maturity)
+
+    def standard_normal_cdf(x: float) -> float:
+        return 0.5 * math.erfc(-x / math.sqrt(2.0))
+
+    if payoff_type == "Call":
+        price = S * standard_normal_cdf(d1) - discount_strike * standard_normal_cdf(d2)
+    else:
+        price = discount_strike * standard_normal_cdf(-d2) - S * standard_normal_cdf(-d1)
+    return max(0.0, price)  # Avoid microscopic negative round-off in deep OTM tails.
+
+
 def binomial_pricing(
     T: int,
     S: float,
